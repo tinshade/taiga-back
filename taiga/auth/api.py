@@ -21,6 +21,8 @@ from .authentication import AUTH_HEADER_TYPES
 from .permissions import AuthPermission
 from .services import private_register_for_new_user
 from .services import public_register
+from .services import generate_logical_password
+from .services import sso_register_for_new_user
 from .services import make_auth_response_data
 from .services import get_auth_plugins
 from .throttling import LoginFailRateThrottle, RegisterSuccessRateThrottle
@@ -47,7 +49,7 @@ refresh_token = partial(_validate_data, cls=serializers.TokenRefreshSerializer)
 verify_token = partial(_validate_data, cls=serializers.TokenVerifySerializer)
 parse_public_register_data = partial(_validate_data, cls=serializers.PublicRegisterSerializer)
 parse_private_register_data = partial(_validate_data, cls=serializers.PrivateRegisterSerializer)
-
+parse_sso_register_data = partial(_validate_data, cls=serializers.SSOResigerSerializer)
 
 class AuthViewSet(viewsets.ViewSet):
     permission_classes = (AuthPermission,)
@@ -122,6 +124,11 @@ class AuthViewSet(viewsets.ViewSet):
 
         data = make_auth_response_data(user)
         return response.Created(data)
+    
+    def _sso_register(self, request):
+        data = parse_sso_register_data(request.DATA)
+        user = sso_register_for_new_user(**data)
+        return user
 
     # Register user: /api/v1/auth/register
     @list_route(methods=["POST"])
@@ -137,5 +144,23 @@ class AuthViewSet(viewsets.ViewSet):
             return self._public_register(request)
         elif type == "private":
             return self._private_register(request)
+        elif type == "sso":
+            return self._sso_register(request)
         raise exc.BadRequest(_("invalid registration type"))
 
+    
+
+    # SSO - MSAL based authentication: /api/v1/auth/sso
+    @list_route(methods=['POST'])
+    def sso(self, request, **kwargs):
+        try:
+            username = request.DATA.get('username')
+            request.DATA['type'] = 'sso'
+            request.DATA['password'] = generate_logical_password(username=username)
+            _user_model = self.register(request)
+
+            data = get_token(request.DATA)
+            return response.Ok(data)
+        except Exception as e:
+            print("Error in authenticating via SSO", "this", e)
+            raise exc.BadRequest(_(str(e)))

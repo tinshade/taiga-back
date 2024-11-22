@@ -101,5 +101,8 @@ class PublicRegisterSerializer(BaseRegisterSerializer):
     pass
 
 
+class SSOResigerSerializer(BaseRegisterSerializer):
+    pass
+
 class PrivateRegisterSerializer(BaseRegisterSerializer):
     token = serializers.CharField(max_length=255, required=True)

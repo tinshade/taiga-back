@@ -12,6 +12,7 @@ import uuid
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.contrib.auth.models import update_last_login
+from django.db.models import Q
 from django.db import IntegrityError
 from django.db import transaction as tx
 from django.utils.translation import gettext_lazy as _
@@ -124,6 +125,16 @@ def send_register_email(user) -> bool:
     return bool(email.send())
 
 
+def generate_logical_password(username:str):
+    password = f"{username}_{str(settings.SECRET_KEY)}"
+    return password
+
+def get_user_instance(username:str, email:str) -> tuple[bool, None | User]:
+    user_model = get_user_model()
+    user = user_model.objects.filter(Q(email=email) | Q(username=username)).first()
+    return bool(user), user
+    
+
 def is_user_already_registered(*, username:str, email:str) -> (bool, str):
     """
     Checks if a specified user is already registred.
@@ -208,4 +219,31 @@ def private_register_for_new_user(token:str, username:str, email:str,
     send_register_email(user)
     user_registered_signal.send(sender=user.__class__, user=user)
 
+    return user
+
+
+
+@tx.atomic
+def sso_register_for_new_user(username:str, email:str, full_name:str, password:str):
+    user_model = get_user_model()
+    # Check if the user exists
+    user_exists, user = get_user_instance(username=username, email=email)
+    
+    if not user_exists:
+        # Generating and adding a random password for SSO Login
+        user = user_model(username=username,
+                        email=email,
+                        email_token=str(uuid.uuid4()),
+                        new_email=email,
+                        verified_email=True,
+                        full_name=full_name,
+                        read_new_terms=True
+                    )
+        user.set_password(password)
+
+        try:
+            user.save()
+        except IntegrityError:
+            raise exc.WrongArguments(_("Error while creating new user."))
+    
     return user
